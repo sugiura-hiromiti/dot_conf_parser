@@ -1,7 +1,8 @@
+use crate::parser::conf::ConfMap;
+use crate::parser::conf::ConfValue;
+use crate::parser::conf::SingleValue;
+use crate::parser::conf::Value;
 use std::fmt::Debug;
-
-use crate::ConfMap;
-use crate::ConfValue;
 
 pub trait Show: Debug {
 	fn show(&self,) {
@@ -30,61 +31,88 @@ pub enum ShowFmt {
 	Debug,
 }
 
-fn rec_conf_map_map<'a,>(
-	conf_map: &'a ConfMap,
-	on_scalar: impl Fn(&String, &String,) -> String + 'a,
-	on_map: impl Fn(&String, &ConfMap,) -> String + 'a,
-) -> impl Iterator<Item = String,> {
-	conf_map.iter().map(move |(key, value,)| match value {
-		ConfValue::Scalar(v,) => on_scalar(key, v,),
-		ConfValue::Map(conf_map,) => on_map(key, conf_map,),
-	},)
+fn render_single(value: &SingleValue,) -> String {
+	match value {
+		SingleValue::String(s,) => s.clone(),
+		SingleValue::Bool(flag,) => flag.to_string(),
+		SingleValue::Integer(num,) => num.to_string(),
+	}
+}
+
+fn render_scalar(value: &Value<SingleValue,>,) -> String {
+	match value {
+		Value::Single(inner,) => render_single(inner,),
+		Value::Collection(entries,) => {
+			entries.iter().map(render_single,).collect::<Vec<_,>>().join(",",)
+		},
+	}
 }
 
 fn conf_map_as_conf(conf_map: &ConfMap,) -> String {
-	fn conf_map_as_conf_inner(
+	fn collect_entries(
 		conf_map: &ConfMap,
-	) -> impl Iterator<Item = String,> {
-		rec_conf_map_map(
-			conf_map,
-			|k, v| k.to_owned() + " = " + v,
-			|k, conf_map| {
-				conf_map_as_conf_inner(conf_map,)
-					.map(|s| k.to_owned() + "." + &s,)
-					.collect::<Vec<_,>>()
-					.join("\n",)
-			},
-		)
+		prefix: &str,
+		output: &mut Vec<String,>,
+	) {
+		for (key, value,) in conf_map.iter() {
+			match value {
+				ConfValue::Scalar(scalar,) => {
+					let full_key = if prefix.is_empty() {
+						key.clone()
+					} else {
+						format!("{prefix}.{key}")
+					};
+					output.push(format!(
+						"{full_key} = {}",
+						render_scalar(scalar,),
+					),);
+				},
+				ConfValue::Map(children,) => {
+					let nested_prefix = if prefix.is_empty() {
+						key.clone()
+					} else {
+						format!("{prefix}.{key}")
+					};
+					collect_entries(
+						&ConfMap::from(children.clone(),),
+						&nested_prefix,
+						output,
+					);
+				},
+			}
+		}
 	}
 
-	conf_map_as_conf_inner(conf_map,).collect::<Vec<_,>>().join("\n",)
+	let mut lines = Vec::new();
+	collect_entries(conf_map, "", &mut lines,);
+	lines.join("\n",)
 }
 
 fn conf_map_as_json(conf_map: &ConfMap,) -> String {
-	fn value_stringify(conf_map: &ConfMap, indent: usize,) -> String {
-		let indents = "\t".repeat(indent + 1,);
-		let sep = ",\n".to_owned();
-		let str_represent = rec_conf_map_map(
-			conf_map,
-			|k, v| indents.clone() + k + ": " + v,
-			|k, conf_map| {
-				let value = &value_stringify(conf_map, indent + 1,);
-				indents.clone() + k + ": " + value
-			},
-		)
-		.collect::<Vec<_,>>()
-		.join(&sep,);
+	fn render_map(conf_map: &ConfMap, indent: usize,) -> String {
+		let indent_str = "\t".repeat(indent,);
+		let child_indent = "\t".repeat(indent + 1,);
+		let mut parts = Vec::new();
 
-		"{\n".to_owned() + &str_represent + "\n" + &"\t".repeat(indent,) + "}"
+		for (key, value,) in conf_map.iter() {
+			let rendered = match value {
+				ConfValue::Scalar(scalar,) => {
+					format!("{child_indent}{key}: {}", render_scalar(scalar,),)
+				},
+				ConfValue::Map(children,) => {
+					let nested = ConfMap::from(children.clone(),);
+					let nested_rendered = render_map(&nested, indent + 1,);
+					format!("{child_indent}{key}: {nested_rendered}")
+				},
+			};
+			parts.push(rendered,);
+		}
+
+		let body = parts.join(",\n",);
+		format!("{{\n{body}\n{indent_str}}}")
 	}
 
-	// let dummy_key = "_";
-	// let mut root = ConfMap::new();
-	// root.insert(dummy_key.to_owned(), ConfValue::Map(conf_map.clone(),),);
-	// let output = value_stringify(&root, 0,);
-
-	value_stringify(conf_map, 0,)
-	// output[dummy_key.len() + 2..].to_string()
+	render_map(conf_map, 0,)
 }
 
 fn conf_map_as_debug(conf_map: &ConfMap,) -> String {
@@ -93,50 +121,71 @@ fn conf_map_as_debug(conf_map: &ConfMap,) -> String {
 
 #[cfg(test)]
 mod tests {
-	use crate::error::ParseError;
-	use crate::parse_str;
-
 	use super::*;
+	use crate::parser::conf::ConfValue;
+	use crate::parser::conf::SingleValue;
+	use crate::parser::conf::Value;
 
-	fn apply_to_parsed_result(
-		input: &str,
-		f: impl Fn(&ConfMap,) -> String,
-	) -> Result<String, ParseError,> {
-		let output = parse_str(input,)?;
-		Ok(f(&output,),)
+	fn sample_conf_map() -> ConfMap {
+		let mut root = ConfMap::new();
+		root.insert(
+			"endpoint".to_string(),
+			ConfValue::Scalar(Value::Single(SingleValue::String(
+				"localhost:3000".to_string(),
+			),),),
+		);
+		root.insert(
+			"debug".to_string(),
+			ConfValue::Scalar(Value::Single(SingleValue::Bool(true,),),),
+		);
+		let mut log_map = ConfMap::new();
+		log_map.insert(
+			"file".to_string(),
+			ConfValue::Scalar(Value::Single(SingleValue::String(
+				"/var/log/console.log".to_string(),
+			),),),
+		);
+		log_map.insert(
+			"name".to_string(),
+			ConfValue::Scalar(Value::Single(SingleValue::String(
+				"default.log".to_string(),
+			),),),
+		);
+		root.insert("log".to_string(), ConfValue::Map(log_map.into_inner(),),);
+		let mut net_map = ConfMap::new();
+		let mut ipv4_map = ConfMap::new();
+		ipv4_map.insert(
+			"ip_local_reserved_ports".to_string(),
+			ConfValue::Scalar(Value::Collection(vec![
+				SingleValue::Integer(8080,),
+				SingleValue::Integer(9148,),
+			],),),
+		);
+		net_map
+			.insert("ipv4".to_string(), ConfValue::Map(ipv4_map.into_inner(),),);
+		root.insert("net".to_string(), ConfValue::Map(net_map.into_inner(),),);
+
+		root
 	}
 
 	#[test]
-	fn test_conf_map_as_conf() -> Result<(), ParseError,> {
-		let input = r#"endpoint = localhost:3000
-debug = true
-log.file = /var/log/console.log
-log.name = default.log
-net.ipv4.ip_local_reserved_ports = 8080,9148
-"#;
-		let output = apply_to_parsed_result(input, conf_map_as_conf,)?;
+	fn conf_map_as_conf_formats_entries() {
+		let output = conf_map_as_conf(&sample_conf_map(),);
 		assert_eq!(
-			r#"debug = true
+			r"debug = true
 endpoint = localhost:3000
 log.file = /var/log/console.log
 log.name = default.log
-net.ipv4.ip_local_reserved_ports = 8080,9148"#,
+net.ipv4.ip_local_reserved_ports = 8080,9148",
 			output
 		);
-
-		Ok((),)
 	}
 
 	#[test]
-	fn test_conf_map_as_json() -> Result<(), ParseError,> {
-		let input = "endpoint = localhost:3000\ndebug = true\nlog.file = \
-		             /var/log/console.log\nlog.name = \
-		             default.log\nnet.ipv4.ip_local_reserved_ports = \
-		             8080,9148\n";
-		let output = apply_to_parsed_result(input, conf_map_as_json,)?;
-		eprintln!("{output}");
+	fn conf_map_as_json_nested_structure() {
+		let output = conf_map_as_json(&sample_conf_map(),);
 		assert_eq!(
-			r#"{
+			r"{
 	debug: true,
 	endpoint: localhost:3000,
 	log: {
@@ -148,10 +197,23 @@ net.ipv4.ip_local_reserved_ports = 8080,9148"#,
 			ip_local_reserved_ports: 8080,9148
 		}
 	}
-}"#,
+}",
 			output
 		);
+	}
 
-		Ok((),)
+	#[test]
+	fn conf_map_as_debug_outputs_debug_string() {
+		let mut conf_map = sample_conf_map();
+		conf_map.insert(
+			"feature.enabled".to_string(),
+			ConfValue::Scalar(Value::Single(SingleValue::Bool(true,),),),
+		);
+
+		let debug = conf_map_as_debug(&conf_map,);
+		assert!(debug.contains("feature.enabled"));
+		assert!(debug.contains("true"));
+
+		conf_map.show_as(ShowFmt::Debug,);
 	}
 }
