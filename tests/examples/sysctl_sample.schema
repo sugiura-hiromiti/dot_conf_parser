@@ -1,0 +1,10 @@
+kernel.domainname -> String
+kernel.hostname -> String
+net.ipv4.ip_forward -> Integer
+net.ipv4.conf.all.rp_filter -> Integer
+net.ipv4.conf.default.rp_filter -> Integer
+net.ipv6.conf.all.disable_ipv6 -> Integer
+net.ipv6.conf.default.disable_ipv6 -> Integer
+vm.swappiness -> Integer
+path.with.space -> String
+service.mode -> String
