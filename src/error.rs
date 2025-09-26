@@ -3,7 +3,7 @@ use crate::parser::conf::SingleValueDiscriminants;
 #[derive(Debug,)]
 pub enum ParseError {
 	Io(std::io::Error,),
-	/// missing `=`
+	/// missing `=`  or `->`
 	MissingDelimiter {
 		line: usize,
 	},
@@ -116,9 +116,10 @@ mod tests {
 			line:  7,
 		};
 		let msg = err.to_string();
-		assert!(msg.contains("invalid value 'yes'"));
-		assert!(msg.contains("expecting Bool"));
-		assert!(msg.contains("line 7"));
+		assert_eq!(
+			msg,
+			"invalid value 'yes' while expecting Bool for 'flag' on line 7",
+		);
 	}
 
 	#[test]
