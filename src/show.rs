@@ -74,7 +74,7 @@ fn conf_map_as_conf(conf_map: &ConfMap,) -> String {
 						format!("{prefix}.{key}")
 					};
 					collect_entries(
-						&ConfMap::from(children.clone(),),
+						&ConfMap::from(children,),
 						&nested_prefix,
 						output,
 					);
@@ -100,7 +100,7 @@ fn conf_map_as_json(conf_map: &ConfMap,) -> String {
 					format!("{child_indent}{key}: {}", render_scalar(scalar,),)
 				},
 				ConfValue::Map(children,) => {
-					let nested = ConfMap::from(children.clone(),);
+					let nested = ConfMap::from(children,);
 					let nested_rendered = render_map(&nested, indent + 1,);
 					format!("{child_indent}{key}: {nested_rendered}")
 				},

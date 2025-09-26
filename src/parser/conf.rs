@@ -11,6 +11,8 @@ use std::ops::DerefMut;
 use std::path::Path;
 use strum_macros::EnumString;
 
+pub type ConfValue = TreeValue<Value<SingleValue,>,>;
+
 #[derive(Debug, Default,)]
 pub struct ConfMap(BTreeMap<String, ConfValue,>,);
 
@@ -43,11 +45,29 @@ impl ConfMap {
 	}
 }
 
-impl From<BTreeMap<String, ConfValue,>,> for ConfMap {
-	fn from(inner: BTreeMap<String, ConfValue,>,) -> Self {
+impl From<&BTreeMap<String, ConfValue,>,> for ConfMap {
+	fn from(inner: &BTreeMap<String, ConfValue,>,) -> Self {
+		let inner = inner
+			.iter()
+			.map(|(key, value,)| {
+				// let value = match value {
+				// 	TreeValue::Scalar(v,) => match v {
+				// 		Value::Single(v,) => {
+				// 			TreeValue::Scalar(Value::Single(v.clone(),),)
+				// 		},
+				// 		Value::Collection(items,) => {
+				// 			TreeValue::Scalar(Value::Collection(items.clone(),),)
+				// 		},
+				// 	},
+				// 	TreeValue::Map(btree_map,) => todo!(),
+				// };
+				(key.clone(), value.clone(),)
+			},)
+			.collect();
 		Self(inner,)
 	}
 }
+
 impl Deref for ConfMap {
 	type Target = BTreeMap<String, ConfValue,>;
 
@@ -62,9 +82,7 @@ impl DerefMut for ConfMap {
 	}
 }
 
-pub type ConfValue = TreeValue<Value<SingleValue,>,>;
-
-#[derive(Debug, strum_macros::EnumDiscriminants,)]
+#[derive(Debug, strum_macros::EnumDiscriminants, Clone,)]
 pub enum Value<T: Valuable,> {
 	Single(T,),
 	Collection(Vec<T,>,),
@@ -202,7 +220,7 @@ fn build_conf_map<L: SchemaLookup + ?Sized,>(
 impl BuildConf for StructuredInput {
 	fn into_conf(self, schema: &SchemaMap,) -> PRslt<ConfMap,> {
 		let conf_map = build_conf_map(self, schema, None,)?;
-		Ok(ConfMap::from(conf_map,),)
+		Ok(ConfMap::from(&conf_map,),)
 	}
 }
 
